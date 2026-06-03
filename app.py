@@ -1,11 +1,9 @@
 import os
 import json
 import requests
-import google.generativeai as genai
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 # ─────────────────────────────────────────────
 #  CONFIGURA TU NEGOCIO AQUÍ
@@ -94,29 +92,35 @@ def receive_message():
 # ─────────────────────────────────────────────
 
 def get_ai_reply(user_id: str, user_message: str) -> str:
-    """Genera una respuesta usando Gemini con historial de conversación."""
+    """Genera una respuesta usando Gemini REST API con historial de conversación."""
     if user_id not in conversations:
         conversations[user_id] = []
 
-    # Construir historial en formato Gemini
-    history = []
+    # Guardar mensaje del usuario
+    conversations[user_id].append({"role": "user", "content": user_message})
+
+    # Construir historial en formato Gemini REST
+    contents = []
     for msg in conversations[user_id][-10:]:
-        history.append({
-            "role": msg["role"],
-            "parts": [msg["content"]]
+        role = "user" if msg["role"] == "user" else "model"
+        contents.append({
+            "role": role,
+            "parts": [{"text": msg["content"]}]
         })
 
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",  # Gratis: 1500 peticiones/día
-        system_instruction=BUSINESS_CONTEXT
-    )
+    api_key = os.environ["GEMINI_API_KEY"]
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
 
-    chat = model.start_chat(history=history)
-    response = chat.send_message(user_message)
-    reply = response.text
+    payload = {
+        "system_instruction": {"parts": [{"text": BUSINESS_CONTEXT}]},
+        "contents": contents
+    }
 
-    # Guardar en historial
-    conversations[user_id].append({"role": "user", "content": user_message})
+    r = requests.post(url, json=payload)
+    r.raise_for_status()
+    reply = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+    # Guardar respuesta en historial
     conversations[user_id].append({"role": "model", "content": reply})
 
     return reply
@@ -149,3 +153,4 @@ def send_instagram_message(recipient_id: str, text: str):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
